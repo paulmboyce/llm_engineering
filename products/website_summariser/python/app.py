@@ -49,7 +49,7 @@ headers = {
 
 class Website:
     """
-    A utility class to represent a Website that we have scraped, now with links
+    A utility class to represent a Website that we have scraped, now with links and images
     """
 
     def __init__(self, url):
@@ -58,14 +58,31 @@ class Website:
         self.body = response.content
         soup = BeautifulSoup(self.body, 'html.parser')
         self.title = soup.title.string if soup.title else "No title found"
-        if soup.body:
-            for irrelevant in soup.body(["script", "style", "img", "input"]):
+        
+        # Initialize empty defaults
+        self.text = ""
+        self.soup = soup
+        self.links_with_images = []
+        
+        if soup and soup.body:
+            # Create a copy for text extraction using a new BeautifulSoup instance
+            text_soup = BeautifulSoup(str(soup), 'html.parser')
+            for irrelevant in text_soup.body(["script", "style", "img", "input"]):
                 irrelevant.decompose()
-            self.text = soup.body.get_text(separator="\n", strip=True)
-        else:
-            self.text = ""
-        links = [link.get('href') for link in soup.find_all('a')]
-        self.links = [link for link in links if link]
+            self.text = text_soup.body.get_text(separator="\n", strip=True)
+            
+            # Get all links with their associated images
+            for link in soup.find_all('a'):
+                href = link.get('href')
+                if href:
+                    img = link.find('img') or link.find_parent().find('img')
+                    img_src = img.get('src') if img else "NONE"
+                    if img_src != "NONE" and not img_src.startswith(('http://', 'https://')):
+                        img_src = requests.compat.urljoin(url, img_src)
+                    self.links_with_images.append({'href': href, 'img': img_src})
+        
+        # Keep the simple links list for backward compatibility
+        self.links = [link['href'] for link in self.links_with_images]
 
     def get_contents(self):
         return f"Webpage Title:\n{self.title}\nWebpage Contents:\n{self.text}\n\n"
@@ -78,14 +95,14 @@ class Website:
 #Respond in markdown."
 
 # Remove unused system_prompt since we're only using link_system_prompt
-link_system_prompt = "You are provided with a list of links found on a webpage. \
-You are able to decide which of the links would be most relevant to include in a an email with articles, and links to pages.\n"
+link_system_prompt = "You are provided with a list of links and their associated images found on a webpage. \
+You are able to decide which of the links would be most relevant to include in an email with articles, links, and images.\n"
 link_system_prompt += "You should respond in JSON as in this example:"
 link_system_prompt += """
 {
     "links": [
-        {"keywords": "arctic,uk,greenland", "title": "the article title 1", "url": "https://full.url/goes/here/blog/post/1"},
-        {"keywords": "co2,melt,storm", "title": "the article title 2": "url": "https://another.full.url/blog/post/2"}
+        {"keywords": "arctic,uk,greenland", "title": "the article title 1", "url": "https://full.url/goes/here/blog/post/1", "image": "https://full.url/goes/here/image1.jpg"},
+        {"keywords": "co2,melt,storm", "title": "the article title 2", "url": "https://another.full.url/blog/post/2", "image": "NONE"}
     ]
 }
 """
@@ -101,11 +118,11 @@ If it includes news or announcements, then summarize these too.\n\n"
     return user_prompt
 
 def get_links_user_prompt(website):
-    user_prompt = f"Here is the list of links on the website of {website.url} - "
-    user_prompt += "please decide which of these are relevant web links for an email with environment and climate news, respond with the keywords (from the title), title and full https URL in JSON format. \
-Do not include Terms of Service, Privacy, email links.\n"
-    user_prompt += "Links (some might be relative links):\n"
-    user_prompt += "\n".join(website.links)
+    user_prompt = f"Here is the list of links and images on the website of {website.url} - "
+    user_prompt += "please decide which of these are relevant web links for an email with environment and climate news, respond with the keywords (from the title), title, full https URL, and associated image URL in JSON format. \
+If there is no image, use 'NONE' as the image value. Do not include Terms of Service, Privacy, email links.\n"
+    user_prompt += "Links and Images:\n"
+    user_prompt += "\n".join([f"Link: {link['href']}, Image: {link['img']}" for link in website.links_with_images])
     return user_prompt
 
 # See how this function creates exactly the format above
@@ -134,11 +151,16 @@ print(f"creating summary for {targetUrl}...")
 summary = get_links(targetUrl)
 print(summary)
 
-system_prompt_for_summary = "You are an assistant that analyzes the links, titles and keywords of a posts on a webpage \
-and creates a short summary of the webpage containing all the links and titles and keywords for an email to a client. Respond in markdown."
+system_prompt_for_summary = """You are an assistant that analyzes the links, titles, keywords, and images of posts on a webpage \
+and creates a short summary of the webpage containing all the links, titles, keywords, and images for an email to a client. 
+For articles with images, include them in the markdown using ![title](image_url) syntax. 
+Organize the content in a clear, visually appealing way. Respond in markdown."""
  
-user_prompt_for_summary = "Here are the links, titles and keywords of the posts on the webpage: \n"
-user_prompt_for_summary += "\n".join([f"{link['title']} - {link['keywords']} - {link['url']}" for link in summary['links']])    
+user_prompt_for_summary = "Here are the links, titles, keywords, and images of the posts on the webpage: \n"
+user_prompt_for_summary += "\n".join([
+    f"{link['title']} - {link['keywords']} - {link['url']} - Image: {link['image']}" 
+    for link in summary['links']
+])    
 
 print(f"-----------------------------------------------\n\n")
 print(f"System prompt for summary: {system_prompt_for_summary}")
