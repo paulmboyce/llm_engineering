@@ -3,6 +3,10 @@
 import json
 import os
 import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 from IPython.display import Markdown, display
@@ -148,42 +152,88 @@ targetUrl = "https://www.theguardian.com/environment/climate-crisis"
 print(f"Started")  
 print(f"creating summary for {targetUrl}...")  
 
+# HTML template for the email
+html_template = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        .article-container {{
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 15px;
+        }}
+        .article-image {{
+            width: 120px;
+            height: 90px;
+            object-fit: cover;
+            margin-right: 15px;
+        }}
+        .article-content {{
+            flex: 1;
+        }}
+        .article-title {{
+            font-size: 18px;
+            margin: 0 0 5px 0;
+            color: #333;
+        }}
+        .article-meta {{
+            font-size: 12px;
+            color: #666;
+        }}
+        @media (max-width: 600px) {{
+            .article-container {{
+                margin-bottom: 15px;
+            }}
+            .article-image {{
+                width: 100px;
+                height: 75px;
+            }}
+            .article-title {{
+                font-size: 16px;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="news-container">
+        {articles}
+    </div>
+</body>
+</html>
+"""
+
+article_template = """
+    <div class="article-container">
+        <img src="{image}" class="article-image" onerror="this.src='https://placehold.co/120x90?text=No+Image'">
+        <div class="article-content">
+            <h2 class="article-title"><a href="{url}">{title}</a></h2>
+            <div class="article-meta">Keywords: {keywords}</div>
+        </div>
+    </div>
+"""
+
+# Replace the OpenAI summary generation with HTML template population
+def generate_html_summary(summary_data):
+    articles_html = []
+    for link in summary_data['links']:
+        article_html = article_template.format(
+            image=link['image'] if link['image'] != 'NONE' else 'https://placehold.co/120x90?text=No+Image',
+            url=link['url'],
+            title=link['title'],
+            keywords=link['keywords']
+        )
+        articles_html.append(article_html)
+    
+    return html_template.format(articles='\n'.join(articles_html))
+
+# Replace the existing summary generation code
 summary = get_links(targetUrl)
-print(summary)
+html_content = generate_html_summary(summary)
 
-system_prompt_for_summary = """You are an assistant that analyzes the links, titles, keywords, and images of posts on a webpage \
-and creates a short summary of the webpage containing all the links, titles, keywords, and images for an email to a client. 
-For articles with images, include them in the markdown using ![title](image_url) syntax. 
-Organize the content in a clear, visually appealing way. Respond in markdown."""
- 
-user_prompt_for_summary = "Here are the links, titles, keywords, and images of the posts on the webpage: \n"
-user_prompt_for_summary += "\n".join([
-    f"{link['title']} - {link['keywords']} - {link['url']} - Image: {link['image']}" 
-    for link in summary['links']
-])    
-
-print(f"-----------------------------------------------\n\n")
-print(f"System prompt for summary: {system_prompt_for_summary}")
-print(f"-----------------------------------------------\n\n")
-print(f"User prompt for summary: {user_prompt_for_summary}")
-print(f"-----------------------------------------------\n\n")
-
-print(f"About to call openai.chat.completions.create....\n\n")
-summary_response = openai.chat.completions.create(
-    model=MODEL,
-    messages=[
-        {"role": "system", "content": system_prompt_for_summary},
-        {"role": "user", "content": user_prompt_for_summary}
-    ]
-)   
-
-summary = summary_response.choices[0].message.content
-print(summary)
-
-#summary = "This is a test summary"
-
-from datetime import datetime
-import os
 
 # Create results directory if it doesn't exist
 results_dir = "results"
@@ -192,52 +242,27 @@ if not os.path.exists(results_dir):
 
 # Generate filename with current timestamp
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-filename = os.path.join(results_dir, f"summary_{timestamp}.md")
+filename = os.path.join(results_dir, f"links_{timestamp}.json")
 
-# Write summary to file
+# Write summary to file - convert dict to JSON string
 with open(filename, "w") as f:
-    f.write(summary)
+    f.write(json.dumps(summary, indent=2))
 
 print(f"Summary saved to {filename}")
-#display(Markdown(summary))
 
-
-
-# Email the summary
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from dotenv import load_dotenv
-
-# Load email credentials from .env file
-load_dotenv()
-
-
-email_password = os.getenv('EMAIL_APP_PASSWORD')
+# The rest of the email sending code remains the same, but we don't need to convert from markdown
+timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
 sender_email = os.getenv('SENDER_EMAIL')
-receiver_email = "paulmboyce@gmail.com"
+email_password = os.getenv('EMAIL_APP_PASSWORD')
+receiver_email = os.getenv('RECEIVER_EMAIL')
 
-print(f"-----------------------------------------------\n\n")
-print(f"About to email the summary to {receiver_email}")
-print(f"-----------------------------------------------\n\n")
 
-print(f"Loaded email: {sender_email}")
-print(f"Password loaded: {'yes' if email_password else 'no'}")
-
-# Create the email message
 message = MIMEMultipart()
 message["From"] = sender_email
 message["To"] = receiver_email
-message["Subject"] = f"Website Summary - {timestamp}"
+message["Subject"] = f"News Summary - {timestamp}"
 
-# Convert markdown to HTML
-from markdown import markdown
-
-# Convert the markdown summary to HTML format
-html_content = markdown(summary)
-
-
-# Add summary as email body
+# Add HTML content directly
 message.attach(MIMEText(html_content, "html"))
 
 # Send email via Gmail SMTP
