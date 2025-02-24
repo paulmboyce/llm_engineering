@@ -13,8 +13,8 @@
     "dev": "ts-node-dev --respawn src/app.ts"
   },
   "dependencies": {
-    "axios": "^1.6.7",
-    "cheerio": "^1.0.0-rc.12",
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
     "date-fns": "^3.6.0",
     "dotenv": "^16.4.1",
     "markdown-it": "^14.0.0",
